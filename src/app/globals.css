@@ -1,26 +1,112 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =====================================================
+   THEME TOKENS (controlados por data-theme no <html>)
+   ===================================================== */
+
+/* ---------- TEMA CLARO (OFICIAL) ---------- */
+:root,
+html[data-theme="light"] {
+  /* base */
+  --background: 248 250 252;   /* slate-50 */
+  --foreground: 15 23 42;      /* slate-900 */
+
+  /* surfaces */
+  --card: 255 255 255;         /* white */
+  --card-muted: 241 245 249;   /* slate-100 */
+
+  /* borders */
+  --border: 226 232 240;       /* slate-200 */
+
+  /* text muted */
+  --muted: 71 85 105;          /* slate-600 */
+  --muted-2: 100 116 139;      /* slate-500 */
+
+  /* accents */
+  --primary: 16 185 129;       /* emerald-500 */
+  --danger: 239 68 68;         /* red-500 */
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ---------- TEMA ESCURO (OPCIONAL) ---------- */
+html[data-theme="dark"] {
+  --background: 9 9 11;        /* zinc-950 */
+  --foreground: 244 244 245;   /* zinc-100 */
+
+  --card: 24 24 27;            /* zinc-900 */
+  --card-muted: 17 17 19;      /* zinc-950 */
+
+  --border: 39 39 42;          /* zinc-800 */
+
+  --muted: 161 161 170;        /* zinc-400 */
+  --muted-2: 113 113 122;      /* zinc-500 */
+
+  --primary: 16 185 129;       /* emerald-500 */
+  --danger: 239 68 68;         /* red-500 */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* =====================================================
+   BASE
+   ===================================================== */
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background-color: rgb(var(--background));
+  color: rgb(var(--foreground));
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* =====================================================
+   SEMANTIC UTILITY CLASSES
+   (use em vez de cores hardcoded)
+   ===================================================== */
+
+@layer utilities {
+  /* backgrounds */
+  .bg-app { background-color: rgb(var(--background)); }
+  .bg-card { background-color: rgb(var(--card)); }
+  .bg-card-muted { background-color: rgb(var(--card-muted)); }
+
+  /* text */
+  .text-app { color: rgb(var(--foreground)); }
+  .text-muted { color: rgb(var(--muted)); }
+  .text-muted-2 { color: rgb(var(--muted-2)); }
+
+  /* borders */
+  .border-app { border-color: rgb(var(--border)); }
+
+  /* buttons */
+  .btn-primary {
+    background-color: rgb(var(--primary));
+    color: rgb(var(--card));
+  }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-primary:disabled { opacity: 0.6; }
+
+  .btn-ghost {
+    border: 1px solid rgb(var(--border));
+    background-color: rgb(var(--card));
+    color: rgb(var(--foreground));
+  }
+  .btn-ghost:hover { background-color: rgb(var(--card-muted)); }
+
+  .btn-danger {
+    border: 1px solid rgb(var(--danger));
+    color: rgb(var(--danger));
+    background-color: transparent;
+  }
+  .btn-danger:hover { background-color: rgb(var(--danger) / 0.1); }
+
+  /* inputs */
+  .input {
+    border: 1px solid rgb(var(--border));
+    background-color: rgb(var(--card));
+    color: rgb(var(--foreground));
+  }
+  .input:focus { outline: 2px solid rgb(var(--primary) / 0.25); outline-offset: 2px; }
+  .input::placeholder { color: rgb(var(--muted-2)); }
+
+  /* chips / badges */
+  .chip {
+    border: 1px solid rgb(var(--border));
+    background-color: rgb(var(--card-muted));
+  }
 }
