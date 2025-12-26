@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { auth } from "@/lib/firebaseClient";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from "firebase/auth";
 import StoreNav from "@/components/StoreNav";
 import { yen } from "@/lib/money";
 import { getLang, onLangChanged, t, type Lang } from "@/lib/i18n";
@@ -49,8 +54,10 @@ function normPhone(s: string) {
 function formatDateAny(ts: any) {
   try {
     if (!ts) return "-";
-    if (typeof ts?.toDate === "function") return ts.toDate().toISOString().slice(0, 16).replace("T", " ");
-    if (ts instanceof Date) return ts.toISOString().slice(0, 16).replace("T", " ");
+    if (typeof ts?.toDate === "function")
+      return ts.toDate().toISOString().slice(0, 16).replace("T", " ");
+    if (ts instanceof Date)
+      return ts.toISOString().slice(0, 16).replace("T", " ");
     return "-";
   } catch {
     return "-";
@@ -77,8 +84,6 @@ function fileToDataUrl(file: File): Promise<string> {
 
 /**
  * Comprime/redimensiona a imagem para evitar payload gigante em base64.
- * - maxSide: tamanho máximo do lado maior (ex: 1280)
- * - quality: qualidade JPEG (0.6~0.85)
  */
 async function compressImageToJpegDataUrl(
   file: File,
@@ -113,9 +118,14 @@ async function compressImageToJpegDataUrl(
 
   ctx.drawImage(img, 0, 0, targetW, targetH);
 
-  // sempre JPEG para reduzir bastante
-  const out = canvas.toDataURL("image/jpeg", quality);
-  return out;
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+// ✅ detecta mobile browser pra usar redirect (popup é instável no mobile)
+function isMobileBrowser() {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
 }
 
 export default function CustomerChatPage() {
@@ -131,7 +141,6 @@ export default function CustomerChatPage() {
 
   const [busy, setBusy] = useState(false);
 
-  // ✅ foto (agora guardamos a dataUrl já comprimida)
   const [photoDataUrl, setPhotoDataUrl] = useState<string>("");
   const [photoPreview, setPhotoPreview] = useState<string>("");
 
@@ -165,35 +174,59 @@ export default function CustomerChatPage() {
       itemCustom: t("item_custom", lang),
 
       // mensagens internas (fallback)
-// mensagens internas (não dependem do i18n tipado)
-sendFail:
-  lang === "ja"
-    ? "送信に失敗しました。もう一度お試しください。"
-    : lang === "en"
-    ? "Failed to send. Please try again."
-    : "Falha ao enviar. Tente novamente.",
+      sendFail:
+        lang === "ja"
+          ? "送信に失敗しました。もう一度お試しください。"
+          : lang === "en"
+          ? "Failed to send. Please try again."
+          : "Falha ao enviar. Tente novamente.",
 
-photoTooBig:
-  lang === "ja"
-    ? "画像が大きすぎます。別の写真を選んでください。"
-    : lang === "en"
-    ? "Image is too large. Please choose another photo."
-    : "Imagem muito grande. Tente outra foto.",
-
+      photoTooBig:
+        lang === "ja"
+          ? "画像が大きすぎます。別の写真を選んでください。"
+          : lang === "en"
+          ? "Image is too large. Please choose another photo."
+          : "Imagem muito grande. Tente outra foto.",
     };
   }, [lang]);
 
   const scrollToBottom = () => {
-    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
+    requestAnimationFrame(() =>
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    );
   };
 
   const statusUi = useMemo(() => {
     const s = String(order?.status || "").toLowerCase().trim();
-    if (s === "paid") return { label: t("status_paid", lang), tone: "good", hint: t("hint_paid", lang) };
-    if (s === "delivered") return { label: t("status_delivered", lang), tone: "good", hint: t("hint_delivered", lang) };
-    if (s === "cancelled" || s === "canceled") return { label: t("status_cancelled", lang), tone: "bad", hint: t("hint_cancelled", lang) };
-    if (s === "confirmed") return { label: t("status_confirmed", lang), tone: "good", hint: t("hint_confirmed", lang) };
-    return { label: t("status_pending", lang), tone: "neutral", hint: t("hint_pending", lang) };
+    if (s === "paid")
+      return {
+        label: t("status_paid", lang),
+        tone: "good",
+        hint: t("hint_paid", lang),
+      };
+    if (s === "delivered")
+      return {
+        label: t("status_delivered", lang),
+        tone: "good",
+        hint: t("hint_delivered", lang),
+      };
+    if (s === "cancelled" || s === "canceled")
+      return {
+        label: t("status_cancelled", lang),
+        tone: "bad",
+        hint: t("hint_cancelled", lang),
+      };
+    if (s === "confirmed")
+      return {
+        label: t("status_confirmed", lang),
+        tone: "good",
+        hint: t("hint_confirmed", lang),
+      };
+    return {
+      label: t("status_pending", lang),
+      tone: "neutral",
+      hint: t("hint_pending", lang),
+    };
   }, [order?.status, lang]);
 
   const badgeClass =
@@ -245,10 +278,10 @@ photoTooBig:
     });
 
     const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("application/json")) return { ok: false, error: "Erro inesperado no login" };
+    if (!ct.includes("application/json"))
+      return { ok: false, error: "Erro inesperado no login" };
 
-    const data = await res.json();
-    return data;
+    return await res.json();
   };
 
   useEffect(() => {
@@ -256,9 +289,45 @@ photoTooBig:
     const offLang = onLangChanged((l) => setLangState(l));
 
     (async () => {
+      // ✅ 1) Se voltou do Redirect do Google, finaliza aqui
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          const idToken = await result.user.getIdToken();
+
+          const res = await fetch("/api/customer/login-google", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+
+          const ct = res.headers.get("content-type") || "";
+          if (!ct.includes("application/json")) {
+            alert("Erro inesperado no login Google");
+          } else {
+            const data = await res.json();
+            if (!data.ok) {
+              alert(data.error || "Falha no login Google");
+            } else {
+              setLogged(true);
+              await fetchState();
+              return;
+            }
+          }
+        }
+      } catch (e: any) {
+        const msg = String(e?.message || "");
+        // Ignora cancelamento comum do usuário
+        if (!/cancel|popup closed|user cancelled|user canceled/i.test(msg)) {
+          alert(msg || "Falha ao finalizar login Google");
+        }
+      }
+
+      // ✅ 2) tenta sessão cookie
       const ok = await tryCookieSession();
       if (ok) return;
 
+      // ✅ 3) tenta phone/pin salvo
       try {
         const p = localStorage.getItem(LS_PHONE) || "";
         const k = localStorage.getItem(LS_PIN) || "";
@@ -317,6 +386,15 @@ photoTooBig:
     setBusy(true);
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      // ✅ Mobile = Redirect (mais confiável)
+      if (isMobileBrowser()) {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+
+      // ✅ Desktop = Popup
       const cred = await signInWithPopup(auth, provider);
       const idToken = await cred.user.getIdToken();
 
@@ -327,7 +405,8 @@ photoTooBig:
       });
 
       const ct = res.headers.get("content-type") || "";
-      if (!ct.includes("application/json")) return alert("Erro inesperado no login Google");
+      if (!ct.includes("application/json"))
+        return alert("Erro inesperado no login Google");
 
       const data = await res.json();
       if (!data.ok) return alert(data.error || "Falha no login Google");
@@ -371,10 +450,17 @@ photoTooBig:
       return its
         .map((it) => {
           const name = String(it.nameSnapshot || it.name || "").trim();
-          const qty = typeof it.qty === "number" && Number.isFinite(it.qty) ? it.qty : Number(it.qty || 0) || 0;
-          const custom = String(it.customText || it.note || it.customization || "").trim();
+          const qty =
+            typeof it.qty === "number" && Number.isFinite(it.qty)
+              ? it.qty
+              : Number(it.qty || 0) || 0;
+          const custom = String(
+            it.customText || it.note || it.customization || ""
+          ).trim();
 
-          const left = [name || "Item", qty ? `x${qty}` : ""].filter(Boolean).join(" ");
+          const left = [name || "Item", qty ? `x${qty}` : ""]
+            .filter(Boolean)
+            .join(" ");
           if (!custom) return left;
           return `${left} — ${L.itemCustom}: ${custom}`;
         })
@@ -394,12 +480,16 @@ photoTooBig:
 
     setBusy(true);
     try {
-      // preview pode ser a própria comprimida (economiza memória)
-      const compressed = await compressImageToJpegDataUrl(file, { maxSide: 1280, quality: 0.78 });
+      const compressed = await compressImageToJpegDataUrl(file, {
+        maxSide: 1280,
+        quality: 0.78,
+      });
 
-      // se ainda estiver gigante, tenta reduzir mais
       if (compressed.length > 1_800_000) {
-        const smaller = await compressImageToJpegDataUrl(file, { maxSide: 900, quality: 0.7 });
+        const smaller = await compressImageToJpegDataUrl(file, {
+          maxSide: 900,
+          quality: 0.7,
+        });
         if (smaller.length > 1_800_000) {
           alert(L.photoTooBig);
           setPhotoDataUrl("");
@@ -428,7 +518,6 @@ photoTooBig:
     const tmsg = text.trim();
     const img = photoDataUrl || null;
 
-    // limpa UI rápido (UX)
     setText("");
     setPhotoDataUrl("");
     setPhotoPreview("");
@@ -438,14 +527,10 @@ photoTooBig:
       const res = await fetch("/api/customer/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: tmsg,
-          imageDataUrl: img,
-        }),
+        body: JSON.stringify({ text: tmsg, imageDataUrl: img }),
       });
 
       if (!res.ok) {
-        // tenta ler erro
         let detail = "";
         try {
           const ct = res.headers.get("content-type") || "";
@@ -490,7 +575,9 @@ photoTooBig:
               {L.pin}
               <input
                 value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                onChange={(e) =>
+                  setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+                }
                 className="input mt-1 w-full rounded-xl px-3 py-2"
                 placeholder={L.pinPh}
               />
@@ -530,10 +617,14 @@ photoTooBig:
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-app">
                   {L.order}
-                  {order?.customerName ? <span className="text-muted"> • {order.customerName}</span> : null}
+                  {order?.customerName ? (
+                    <span className="text-muted"> • {order.customerName}</span>
+                  ) : null}
                 </div>
 
-                <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${badgeClass}`}>
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${badgeClass}`}
+                >
                   {statusUi.label}
                 </span>
               </div>
@@ -548,9 +639,14 @@ photoTooBig:
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs text-muted">
-                  {L.createdAt}: <span className="font-mono">{formatDateAny(order?.createdAt)}</span>
+                  {L.createdAt}:{" "}
+                  <span className="font-mono">
+                    {formatDateAny(order?.createdAt)}
+                  </span>
                 </div>
-                <div className="text-lg font-bold text-[rgb(var(--primary))]">{yen(Number(order?.total || 0))}</div>
+                <div className="text-lg font-bold text-[rgb(var(--primary))]">
+                  {yen(Number(order?.total || 0))}
+                </div>
               </div>
 
               <div className="mt-2 text-xs text-muted">{statusUi.hint}</div>
@@ -577,7 +673,9 @@ photoTooBig:
                             : "mr-auto border-app bg-card",
                         ].join(" ")}
                       >
-                        {m.text ? <div className="whitespace-pre-wrap text-app">{m.text}</div> : null}
+                        {m.text ? (
+                          <div className="whitespace-pre-wrap text-app">{m.text}</div>
+                        ) : null}
 
                         {img ? (
                           <div className="mt-2 overflow-hidden rounded-xl border border-app bg-card-muted">

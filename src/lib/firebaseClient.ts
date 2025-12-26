@@ -1,3 +1,4 @@
+// /src/lib/firebaseClient.ts
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
@@ -11,21 +12,6 @@ const firebaseConfig = {
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
 };
-
-// Ajuda a detectar env faltando no deploy (melhor erro do que “não acontece nada”)
-function assertFirebaseEnv() {
-  const missing = Object.entries(firebaseConfig)
-    .filter(([_, v]) => !v)
-    .map(([k]) => k);
-
-  if (missing.length) {
-    throw new Error(
-      `Firebase env missing: ${missing.join(", ")}. Check Vercel Environment Variables.`
-    );
-  }
-}
-
-assertFirebaseEnv();
 
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
