@@ -294,110 +294,116 @@ export default function AdminHomePage() {
     }
   };
 
-  async function loadDashboardStats() {
-    setLoadingStats(true);
-    setStatsError("");
+  // ... (mantenha os utilitários clamp, startOfDay, fmtYMD, yen, toDateSafe e os drawCharts como estão)
 
-    try {
-      // ---- Revenue last 14 days (orders) ----
-      const now = new Date();
-      const start14 = startOfDay(new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000)); // inclusive
-      const endNow = now;
+async function loadDashboardStats() {
+  setLoadingStats(true);
+  setStatsError("");
 
-      const qOrders = query(
-        collection(db, "orders"),
-        where("createdAt", ">=", Timestamp.fromDate(start14)),
-        where("createdAt", "<=", Timestamp.fromDate(endNow)),
-        orderBy("createdAt", "desc"),
-        limit(500)
-      );
+  try {
+    const now = new Date();
+    const start14 = startOfDay(new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000));
+    const start30 = startOfDay(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
+    const endNow = now;
 
-      const ordersSnap = await getDocs(qOrders);
+    // ---- 1. RECEITA (ORDERS) ----
+    const qOrders = query(
+      collection(db, "orders"),
+      where("createdAt", ">=", Timestamp.fromDate(start14)),
+      orderBy("createdAt", "desc"),
+      limit(500)
+    );
 
-      const mapDayRevenue = new Map<string, number>();
-      const mapStatusCount: Record<string, number> = {
-        pending: 0,
-        paid: 0,
-        delivered: 0,
-        cancelled: 0,
-      };
+    const ordersSnap = await getDocs(qOrders);
+    const mapDayRevenue = new Map<string, number>();
+    const mapStatusCount: Record<string, number> = {
+      pending: 0, paid: 0, delivered: 0, cancelled: 0,
+    };
 
-      ordersSnap.docs.forEach((d) => {
-        const o: any = d.data();
-        const st = String(o?.status || "pending").toLowerCase().trim();
-        if (mapStatusCount[st] != null) mapStatusCount[st]++;
+    ordersSnap.docs.forEach((d) => {
+      const o: any = d.data();
+      const st = String(o?.status || "pending").toLowerCase().trim();
+      
+      // Contagem para o gráfico de barras
+      if (mapStatusCount.hasOwnProperty(st)) mapStatusCount[st]++;
 
-        const dt = toDateSafe(o?.createdAt);
-        if (!dt) return;
-        const key = fmtYMD(startOfDay(dt));
-        const rev = Number(o?.totals?.revenue || 0) || 0;
+      // Data segura (fallback para múltiplos campos)
+      const dt = toDateSafe(o?.createdAt || o?.occurredAt || o?.date);
+      if (!dt) return;
+
+      const key = fmtYMD(startOfDay(dt));
+      const rev = Number(o?.totals?.revenue || 0);
+
+      // Apenas soma no gráfico de linha se NÃO estiver cancelado
+      if (st !== "cancelled") {
         mapDayRevenue.set(key, (mapDayRevenue.get(key) || 0) + rev);
-      });
-
-      const labels14: string[] = [];
-      const values14: number[] = [];
-      for (let i = 13; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const key = fmtYMD(startOfDay(d));
-        labels14.push(key.slice(5)); // MM-DD
-        values14.push(mapDayRevenue.get(key) || 0);
       }
+    });
 
-      setRev14Labels(labels14);
-      setRev14Values(values14);
-
-      setStatusValues([
-        mapStatusCount.pending || 0,
-        mapStatusCount.paid || 0,
-        mapStatusCount.delivered || 0,
-        mapStatusCount.cancelled || 0,
-      ]);
-
-      // ---- Cashflow last 30 days (cash_movements) ----
-      const start30 = startOfDay(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
-      const qCash = query(
-        collection(db, "cash_movements"),
-        where("createdAt", ">=", Timestamp.fromDate(start30)),
-        where("createdAt", "<=", Timestamp.fromDate(endNow)),
-        orderBy("createdAt", "desc"),
-        limit(1000)
-      );
-
-      const cashSnap = await getDocs(qCash);
-      const mapDayNet = new Map<string, number>();
-
-      cashSnap.docs.forEach((d) => {
-        const c: any = d.data();
-        const dt = toDateSafe(c?.createdAt);
-        if (!dt) return;
-        const key = fmtYMD(startOfDay(dt));
-
-        // aceita: type = "in"|"out" OU amount positivo/negativo
-        const rawAmount = Number(c?.amount || 0) || 0;
-        const type = String(c?.type || "").toLowerCase().trim();
-        const signed =
-          type === "out" ? -Math.abs(rawAmount) : type === "in" ? Math.abs(rawAmount) : rawAmount;
-
-        mapDayNet.set(key, (mapDayNet.get(key) || 0) + signed);
-      });
-
-      const labels30: string[] = [];
-      const values30: number[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const key = fmtYMD(startOfDay(d));
-        labels30.push(key.slice(5)); // MM-DD
-        values30.push(mapDayNet.get(key) || 0);
-      }
-
-      setCash30Labels(labels30);
-      setCash30Values(values30);
-    } catch (e: any) {
-      setStatsError(e?.message || "Falha ao carregar gráficos");
-    } finally {
-      setLoadingStats(false);
+    // Preencher labels 14 dias
+    const labels14: string[] = [];
+    const values14: number[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const key = fmtYMD(startOfDay(d));
+      labels14.push(key.slice(5)); 
+      values14.push(mapDayRevenue.get(key) || 0);
     }
+
+    // ---- 2. FLUXO DE CAIXA (CASH_MOVEMENTS) ----
+    const qCash = query(
+      collection(db, "cash_movements"),
+      where("createdAt", ">=", Timestamp.fromDate(start30)),
+      orderBy("createdAt", "desc"),
+      limit(1000)
+    );
+
+    const cashSnap = await getDocs(qCash);
+    const mapDayNet = new Map<string, number>();
+
+    cashSnap.docs.forEach((d) => {
+      const c: any = d.data();
+      const dt = toDateSafe(c?.createdAt || c?.occurredAt);
+      if (!dt) return;
+
+      const key = fmtYMD(startOfDay(dt));
+      const rawAmount = Number(c?.amount || 0);
+      const type = String(c?.type || "").toLowerCase().trim();
+
+      // Força o sinal correto baseado no tipo
+      const signed = type === "out" ? -Math.abs(rawAmount) : Math.abs(rawAmount);
+      mapDayNet.set(key, (mapDayNet.get(key) || 0) + signed);
+    });
+
+    // Preencher labels 30 dias
+    const labels30: string[] = [];
+    const values30: number[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const key = fmtYMD(startOfDay(d));
+      labels30.push(key.slice(5));
+      values30.push(mapDayNet.get(key) || 0);
+    }
+
+    // Atualizar Estados
+    setRev14Labels(labels14);
+    setRev14Values(values14);
+    setStatusValues([
+      mapStatusCount.pending,
+      mapStatusCount.paid,
+      mapStatusCount.delivered,
+      mapStatusCount.cancelled,
+    ]);
+    setCash30Labels(labels30);
+    setCash30Values(values30);
+
+  } catch (e: any) {
+    console.error("Erro no Dashboard:", e);
+    setStatsError(e?.message || "Erro ao carregar dados.");
+  } finally {
+    setLoadingStats(false);
   }
+}
 
   // load stats when admin is active
   useEffect(() => {
@@ -471,16 +477,6 @@ export default function AdminHomePage() {
         <h1 className="text-2xl font-bold text-app">Dashboard</h1>
 
         <div className="mt-4 rounded-2xl border border-app bg-card p-4 shadow-sm">
-          <div className="text-sm text-muted">Seu UID (copie pro .env.local):</div>
-
-          <div className="mt-2 rounded-xl border border-app bg-card-muted p-3 font-mono text-xs text-app">
-            {uid || "—"}
-          </div>
-
-          <div className="mt-3 text-sm text-muted">
-            Admin ativo (Firestore):{" "}
-            <b className="text-app">{isAdminDoc === null ? "—" : isAdminDoc ? "SIM" : "NÃO"}</b>
-          </div>
 
           {!isAdminDoc ? (
             <div className="mt-3 rounded-xl border border-[rgb(var(--warning))] bg-[rgb(var(--warning))/0.10] p-3 text-sm text-app">

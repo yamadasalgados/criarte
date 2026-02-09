@@ -4,7 +4,7 @@ import admin from "firebase-admin";
 import crypto from "crypto";
 
 import { getAdminAuth, getAdminBucket, getAdminDb } from "@/lib/firebaseAdmin";
-import { verifySession, hashPin } from "@/lib/customerSession";
+import { verifySession } from "@/lib/customerSession";
 
 /* ------------------ helpers ------------------ */
 
@@ -13,8 +13,16 @@ function normalizeStatus(s: any) {
   return v || "pending";
 }
 
-function normalizePhoneLoose(p: any) {
-  return String(p || "").replace(/[^\d]/g, "");
+/**
+ * ✅ Canonical JP phone:
+ * - remove não-dígitos
+ * - 81xxxxxxxxxx -> 0xxxxxxxxxx
+ */
+function normalizePhoneJPServer(input: any) {
+  let d = String(input || "").replace(/[^\d]/g, "");
+  if (!d) return "";
+  if (d.startsWith("81") && d.length >= 10) d = "0" + d.slice(2);
+  return d;
 }
 
 function pickCustomText(it: any): string {
@@ -46,7 +54,6 @@ function buildItemsSummary(order: any) {
 
       const custom = pickCustomText(it);
       const base = Number.isFinite(qty) && qty > 0 ? `${name} x${qty}` : name;
-
       return custom ? `${base} (${custom})` : base;
     })
     .filter(Boolean) as string[];
@@ -57,12 +64,11 @@ function buildItemsSummary(order: any) {
 async function getSessionFromCookie() {
   const jar = await cookies();
   const token = jar.get("cust_session")?.value || null;
-  return verifySession(token); // { orderId, phone } | null
+  return verifySession(token); // { orderId, phone } | null (conforme seu signSession)
 }
 
 /**
  * ✅ Admin auth: Bearer token com claim admin=true
- * Se isso retornar null, o request é tratado como CLIENTE.
  */
 async function getAdminFromAuthHeader(req: Request): Promise<{ uid: string } | null> {
   const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
@@ -75,33 +81,44 @@ async function getAdminFromAuthHeader(req: Request): Promise<{ uid: string } | n
   try {
     const auth = getAdminAuth();
     const decoded = await auth.verifyIdToken(idToken, true);
-
-    // ⚠️ GARANTE claim admin
     if (decoded?.admin === true) return { uid: decoded.uid };
     return null;
-  } catch (e) {
+  } catch {
     console.warn("[messages] invalid admin bearer token");
     return null;
   }
 }
 
+/**
+ * ✅ Ownership robusto (JP):
+ * compara phone do cookie com phone do pedido,
+ * aceitando 050... e +81... como equivalentes.
+ */
 function assertCustomerOwnsOrderOrThrow(opts: { order: any; sessionPhone: string }) {
   const { order, sessionPhone } = opts;
 
-  const phoneSessNorm = normalizePhoneLoose(sessionPhone);
-  if (!phoneSessNorm) throw new Error("Forbidden");
+  const sessPhoneNorm = normalizePhoneJPServer(sessionPhone);
+  if (!sessPhoneNorm) throw new Error("Forbidden");
 
-  const orderPhoneHash =
-    typeof order?.customer?.phoneHash === "string" ? order.customer.phoneHash.trim() : "";
+  const orderPhoneNorm =
+    normalizePhoneJPServer(order?.customerPhoneNorm) ||
+    normalizePhoneJPServer(order?.customer?.phoneNorm) ||
+    normalizePhoneJPServer(order?.customerPhone) ||
+    normalizePhoneJPServer(order?.customer?.phone) ||
+    normalizePhoneJPServer(order?.customerPhoneRaw) ||
+    "";
 
-  if (orderPhoneHash) {
-    const sessHash = hashPin(phoneSessNorm);
-    if (sessHash !== orderPhoneHash) throw new Error("Forbidden");
-    return;
+  if (!orderPhoneNorm) throw new Error("Forbidden");
+
+  if (orderPhoneNorm !== sessPhoneNorm) {
+    // log ajuda MUITO
+    console.warn("[messages] Forbidden ownership mismatch", {
+      sessPhoneNorm,
+      orderPhoneNorm,
+      orderId: String(order?.id || ""),
+    });
+    throw new Error("Forbidden");
   }
-
-  const orderPhone = normalizePhoneLoose(order?.customer?.phone || order?.customerPhone || order?.phone || "");
-  if (orderPhone && orderPhone !== phoneSessNorm) throw new Error("Forbidden");
 }
 
 /* ------------------ image helpers ------------------ */
@@ -166,10 +183,6 @@ async function uploadMessageImage(opts: {
   const imagePath = `orders/${orderId}/messages/${messageId}.${ext}`;
   const file = bucket.file(imagePath);
 
-  console.log("[messages] upload bucket:", bucket.name);
-  console.log("[messages] upload path:", imagePath);
-  console.log("[messages] bytes:", buffer.length);
-
   await file.save(buffer, {
     resumable: false,
     metadata: {
@@ -198,20 +211,8 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url);
-
-    // ✅ Cliente: orderId SEMPRE da sessão
-    // ✅ Admin: orderId via ?orderId=...
-    const orderId = adminSender
-      ? String(url.searchParams.get("orderId") || "").trim()
-      : String(sess?.orderId || "").trim();
-
+    const orderId = String(url.searchParams.get("orderId") || "").trim();
     if (!orderId) return NextResponse.json({ ok: false, error: "Missing orderId" }, { status: 400 });
-
-    console.log(
-      `[messages] GET mode=${adminSender ? "admin" : "customer"} orderId=${orderId}${
-        adminSender ? ` adminUid=${adminSender.uid}` : ""
-      }`
-    );
 
     const db = getAdminDb();
     const orderRef = db.collection("orders").doc(orderId);
@@ -221,19 +222,25 @@ export async function GET(req: Request) {
       orderRef.collection("messages").orderBy("createdAt", "asc").limit(300).get(),
     ]);
 
-    if (!orderSnap.exists) return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
+    if (!orderSnap.exists) {
+      return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
+    }
 
     const order = orderSnap.data() as any;
 
-    if (!adminSender && sess?.phone) {
+    if (!adminSender) {
+      const phone = normalizePhoneJPServer((sess as any)?.phone || "");
+      if (!phone) return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+
       try {
-        assertCustomerOwnsOrderOrThrow({ order, sessionPhone: sess.phone });
+        assertCustomerOwnsOrderOrThrow({ order, sessionPhone: phone });
       } catch {
         return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
       }
     }
 
-    const itemsSummary = String(order?.itemsSummary || "").trim() || buildItemsSummary(order) || "Itens do pedido";
+    const itemsSummary =
+      String(order?.itemsSummary || "").trim() || buildItemsSummary(order) || "Itens do pedido";
 
     const items = (Array.isArray(order?.items) ? order.items : []).map((it: any) => ({
       nameSnapshot: String(it?.nameSnapshot || "").trim(),
@@ -247,7 +254,7 @@ export async function GET(req: Request) {
       status: normalizeStatus(order?.status),
       itemsSummary,
       items,
-      total: Number(order?.totals?.revenue || 0),
+      total: Number(order?.totals?.revenue || order?.totals?.total || order?.total || 0),
       customerName: String(order?.customer?.name || "").trim(),
       createdAt: order?.createdAt || null,
       paidAt: order?.paidAt || null,
@@ -294,27 +301,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing text or image" }, { status: 400 });
     }
 
-    /**
-     * ✅ CRÍTICO:
-     * - Se for ADMIN: orderId TEM que vir no body
-     * - Se for CUSTOMER: orderId vem só da sessão
-     */
-    const orderId = adminSender
-      ? String(body?.orderId || "").trim()
-      : String(sess?.orderId || "").trim();
-
-    if (!orderId) {
-      return NextResponse.json(
-        { ok: false, error: adminSender ? "Missing orderId" : "Not authenticated" },
-        { status: adminSender ? 400 : 401 }
-      );
-    }
-
-    console.log(
-      `[messages] POST mode=${adminSender ? "admin" : "customer"} orderId=${orderId}${
-        adminSender ? ` adminUid=${adminSender.uid}` : ""
-      }`
-    );
+    const orderId = String(body?.orderId || "").trim();
+    if (!orderId) return NextResponse.json({ ok: false, error: "Missing orderId" }, { status: 400 });
 
     const db = getAdminDb();
     const orderRef = db.collection("orders").doc(orderId);
@@ -324,9 +312,12 @@ export async function POST(req: Request) {
 
     const order = orderSnap.data() as any;
 
-    if (!adminSender && sess?.phone) {
+    if (!adminSender) {
+      const phone = normalizePhoneJPServer((sess as any)?.phone || "");
+      if (!phone) return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+
       try {
-        assertCustomerOwnsOrderOrThrow({ order, sessionPhone: sess.phone });
+        assertCustomerOwnsOrderOrThrow({ order, sessionPhone: phone });
       } catch {
         return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
       }

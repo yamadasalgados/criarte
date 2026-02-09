@@ -15,7 +15,12 @@ import {
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
-import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { 
+  getDownloadURL, 
+  ref as storageRef, 
+  uploadBytes, 
+  deleteObject 
+} from "firebase/storage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
@@ -41,7 +46,6 @@ export default function AdminProductsPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // ✅ ref do input file (pra limpar sem TS error)
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const profitPreview = useMemo(() => {
@@ -52,22 +56,18 @@ export default function AdminProductsPage() {
 
   const load = async () => {
     setLoading(true);
-    const qy = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    const snap = await getDocs(qy);
-    const list: ProductRow[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    setItems(list);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  const clearPhotoInput = () => {
-    if (photoInputRef.current) {
-      photoInputRef.current.value = "";
+    try {
+      const qy = query(collection(db, "products"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(qy);
+      setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
+
+  useEffect(() => { load(); }, []);
 
   const resetForm = () => {
     setEditingId(null);
@@ -76,7 +76,7 @@ export default function AdminProductsPage() {
     setUnitCost("");
     setActive(true);
     setPhotoFile(null);
-    clearPhotoInput();
+    if (photoInputRef.current) photoInputRef.current.value = "";
   };
 
   const startEdit = (p: ProductRow) => {
@@ -86,51 +86,40 @@ export default function AdminProductsPage() {
     setUnitCost(String(p.unitCost ?? ""));
     setActive(!!p.active);
     setPhotoFile(null);
-    clearPhotoInput();
+    if (photoInputRef.current) photoInputRef.current.value = "";
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const uploadPhotoIfAny = async (): Promise<string | null> => {
     if (!photoFile) return null;
-
     const ext = photoFile.name.split(".").pop() || "jpg";
     const path = `products/${uuidv4()}.${ext}`;
     const r = storageRef(storage, path);
-
     await uploadBytes(r, photoFile, { contentType: photoFile.type });
-    const url = await getDownloadURL(r);
-    return url;
+    return await getDownloadURL(r);
   };
 
   const save = async () => {
-    if (!name.trim()) return alert("Nome do produto é obrigatório.");
-
-    const sp = Number(salePrice);
-    const uc = Number(unitCost);
-
-    if (!Number.isFinite(sp) || sp <= 0) return alert("Preço de venda inválido.");
-    if (!Number.isFinite(uc) || uc < 0) return alert("Custo unitário inválido.");
-
+    if (!name.trim()) return alert("Nome é obrigatório.");
     setBusy(true);
+
     try {
       const photoUrl = await uploadPhotoIfAny();
+      const payload: any = {
+        name: name.trim(),
+        salePrice: Number(salePrice),
+        unitCost: Number(unitCost),
+        active,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (photoUrl) payload.photos = [photoUrl];
 
       if (editingId) {
-        const payload: any = {
-          name: name.trim(),
-          salePrice: sp,
-          unitCost: uc,
-          active,
-          updatedAt: serverTimestamp(),
-        };
-        if (photoUrl) payload.photos = [photoUrl];
         await updateDoc(doc(db, "products", editingId), payload);
       } else {
         await addDoc(collection(db, "products"), {
-          name: name.trim(),
-          salePrice: sp,
-          unitCost: uc,
-          active,
+          ...payload,
           photos: photoUrl ? [photoUrl] : [],
           createdAt: serverTimestamp(),
         });
@@ -139,19 +128,43 @@ export default function AdminProductsPage() {
       await load();
       resetForm();
     } catch (e: any) {
-      alert(e?.message || "Erro ao salvar produto");
+      alert("Erro ao salvar: " + e.message);
     } finally {
       setBusy(false);
     }
   };
 
-  const remove = async (id: string) => {
-    if (!confirm("Excluir este produto?")) return;
+  // ✅ NÍVEL PROFISSIONAL: Exclusão com limpeza de Storage
+  const remove = async (product: ProductRow) => {
+    const confirmMsg = product.photos?.length 
+      ? "Excluir este produto e TODAS as fotos associadas?" 
+      : "Excluir este produto?";
+    
+    if (!confirm(confirmMsg)) return;
+
+    setBusy(true);
     try {
-      await deleteDoc(doc(db, "products", id));
+      // 1. Limpeza de Imagens no Storage
+      if (product.photos && product.photos.length > 0) {
+        for (const url of product.photos) {
+          try {
+            // Extrai a referência do Storage a partir da URL
+            const imageRef = storageRef(storage, url);
+            await deleteObject(imageRef);
+          } catch (storageErr) {
+            console.warn("Aviso: Imagem não encontrada no Storage ou já deletada.");
+          }
+        }
+      }
+
+      // 2. Exclusão do Documento
+      await deleteDoc(doc(db, "products", product.id));
+      
       await load();
     } catch (e: any) {
-      alert(e?.message || "Erro ao excluir");
+      alert("Erro ao excluir: " + e.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -161,150 +174,89 @@ export default function AdminProductsPage() {
         <Navbar />
         <main className="mx-auto max-w-5xl px-4 py-6">
           <h1 className="text-2xl font-bold text-app">Produtos</h1>
-          <p className="mt-1 text-sm text-muted">
-            Cadastre produtos com <b className="text-app">preço de venda</b> e{" "}
-            <b className="text-app">custo unitário da matéria-prima</b>.
-          </p>
 
-          {/* FORM */}
+          {/* FORMULÁRIO */}
           <div className="mt-6 rounded-2xl border border-app bg-card p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-app">{editingId ? "Editar produto" : "Novo produto"}</div>
-              {editingId ? (
-                <button onClick={resetForm} className="btn-ghost rounded-xl px-3 py-2 text-sm">
-                  Cancelar
-                </button>
-              ) : null}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold">{editingId ? "Editar Produto" : "Novo Produto"}</h2>
+              {editingId && <button onClick={resetForm} className="text-xs text-muted underline">Cancelar</button>}
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="text-sm text-app">
-                Nome
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="input mt-1 w-full rounded-xl px-3 py-2"
-                />
-              </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do produto" className="input rounded-xl px-3 py-2" />
+              <select value={active ? "active" : "inactive"} onChange={e => setActive(e.target.value === "active")} className="input rounded-xl px-3 py-2">
+                <option value="active">Ativo</option>
+                <option value="inactive">Inativo</option>
+              </select>
+              <input 
+  value={salePrice} 
+  onChange={e => setSalePrice(e.target.value.replace(/\D/g,""))} 
+  placeholder="Preço de venda (¥)" 
+  className="input rounded-xl px-3 py-2"
+  // Adicione estes dois abaixo:
+  inputMode="numeric" 
+  pattern="[0-9]*"
+/>
 
-              <label className="text-sm text-app">
-                Status
-                <select
-                  value={active ? "active" : "inactive"}
-                  onChange={(e) => setActive(e.target.value === "active")}
-                  className="input mt-1 w-full rounded-xl px-3 py-2"
-                >
-                  <option value="active">Ativo</option>
-                  <option value="inactive">Inativo</option>
-                </select>
-              </label>
-
-              <label className="text-sm text-app">
-                Preço de venda (¥)
-                <input
-                  inputMode="numeric"
-                  value={salePrice}
-                  onChange={(e) => setSalePrice(e.target.value.replace(/[^\d]/g, ""))}
-                  className="input mt-1 w-full rounded-xl px-3 py-2"
-                  placeholder="ex: 1200"
-                />
-              </label>
-
-              <label className="text-sm text-app">
-                Custo unitário (¥)
-                <input
-                  inputMode="numeric"
-                  value={unitCost}
-                  onChange={(e) => setUnitCost(e.target.value.replace(/[^\d]/g, ""))}
-                  className="input mt-1 w-full rounded-xl px-3 py-2"
-                  placeholder="ex: 350"
-                />
-              </label>
-
-              <label className="text-sm text-app sm:col-span-2">
-                Foto do produto (opcional)
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                  className="input mt-1 w-full rounded-xl px-3 py-2"
-                />
-              </label>
-            </div>
-
-            <div className="mt-4 rounded-xl border border-app bg-card-muted p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted">Lucro estimado por unidade</span>
-                <b className={profitPreview >= 0 ? "text-[rgb(var(--primary))]" : "text-[rgb(var(--danger))]"}>
-                  {yen(profitPreview)}
-                </b>
+<input 
+  value={unitCost} 
+  onChange={e => setUnitCost(e.target.value.replace(/\D/g,""))} 
+  placeholder="Custo unitário (¥)" 
+  className="input rounded-xl px-3 py-2"
+  // Adicione estes dois abaixo:
+  inputMode="numeric" 
+  pattern="[0-9]*"
+/><div className="sm:col-span-2">
+                <p className="text-xs text-muted mb-1">Foto do produto</p>
+                <input ref={photoInputRef} type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} className="input w-full rounded-xl px-3 py-2" />
               </div>
-              <div className="mt-1 text-xs text-muted">Considera apenas custo unitário da matéria-prima.</div>
             </div>
 
-            <button
-              disabled={busy}
-              onClick={save}
-              className="mt-4 rounded-xl bg-[rgb(var(--primary))] px-4 py-2 text-sm font-semibold text-[rgb(var(--panel2))] hover:brightness-110 disabled:opacity-60"
-            >
-              {busy ? "Salvando…" : editingId ? "Salvar alterações" : "Cadastrar produto"}
+            <div className="mt-4 p-3 rounded-xl bg-card-muted flex justify-between items-center">
+              <span className="text-sm text-muted">Lucro unitário:</span>
+              <b className={profitPreview >= 0 ? "text-[rgb(var(--primary))]" : "text-[rgb(var(--danger))]"}>{yen(profitPreview)}</b>
+            </div>
+
+            <button disabled={busy} onClick={save} className="btn-primary mt-4 w-full rounded-xl py-2 font-semibold disabled:opacity-50">
+              {busy ? "Processando..." : editingId ? "Atualizar Produto" : "Cadastrar Produto"}
             </button>
           </div>
 
-          {/* LIST */}
-          <div className="mt-6">
-            <div className="text-sm text-muted">{loading ? "Carregando…" : `${items.length} produto(s)`}</div>
+          {/* LISTA */}
+          <div className="mt-8">
+            <div className="flex justify-between items-end mb-4">
+              <h2 className="text-sm text-muted font-medium">{loading ? "Carregando..." : `${items.length} produtos cadastrados`}</h2>
+            </div>
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {items.map((p) => (
-                <div key={p.id} className="rounded-2xl border border-app bg-card p-4 shadow-sm">
-                  <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-card-muted border border-app">
+                <div key={p.id} className={`rounded-2xl border border-app bg-card p-4 transition-opacity ${!p.active ? 'opacity-60' : ''}`}>
+                  <div className="aspect-square rounded-xl bg-card-muted overflow-hidden border border-app mb-3">
                     {p.photos?.[0] ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={p.photos[0]} alt={p.name} className="h-full w-full object-cover" />
                     ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-muted">Sem foto</div>
+                      <div className="h-full flex items-center justify-center text-xs text-muted">Sem imagem</div>
                     )}
                   </div>
 
-                  <div className="mt-3 font-semibold text-app">{p.name}</div>
-
-                  <div className="mt-1 text-sm text-muted">
-                    Venda: <b className="text-app">{yen(p.salePrice)}</b>
+                  <h3 className="font-bold truncate">{p.name}</h3>
+                  <div className="text-sm mt-2 flex justify-between">
+                    <span className="text-muted">Venda:</span>
+                    <span className="font-semibold">{yen(p.salePrice)}</span>
                   </div>
-                  <div className="text-sm text-muted">
-                    Custo: <b className="text-app">{yen(p.unitCost)}</b>
-                  </div>
-                  <div className="text-sm text-muted">
-                    Lucro:{" "}
-                    <b
-                      className={
-                        (p.salePrice || 0) - (p.unitCost || 0) >= 0
-                          ? "text-[rgb(var(--primary))]"
-                          : "text-[rgb(var(--danger))]"
-                      }
-                    >
-                      {yen((p.salePrice || 0) - (p.unitCost || 0))}
-                    </b>
-                  </div>
-
-                  <div className="mt-2 text-xs text-muted">
-                    Status:{" "}
-                    <b className={p.active ? "text-[rgb(var(--primary))]" : "text-muted"}>
-                      {p.active ? "Ativo" : "Inativo"}
-                    </b>
+                  <div className="text-sm flex justify-between">
+                    <span className="text-muted">Custo:</span>
+                    <span>{yen(p.unitCost)}</span>
                   </div>
 
                   <div className="mt-4 flex gap-2">
-                    <button onClick={() => startEdit(p)} className="btn-ghost flex-1 rounded-xl px-3 py-2 text-sm">
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => remove(p.id)}
-                      className="rounded-xl border border-[rgb(var(--danger))] bg-[rgb(var(--danger))/0.06] px-3 py-2 text-sm text-[rgb(var(--danger))] hover:brightness-110"
+                    <button onClick={() => startEdit(p)} className="btn-ghost flex-1 py-1.5 rounded-lg text-sm">Editar</button>
+                    <button 
+                      disabled={busy} 
+                      onClick={() => remove(p)} 
+                      className="border border-[rgb(var(--danger))] text-[rgb(var(--danger))] bg-[rgb(var(--danger))/0.05] px-3 py-1.5 rounded-lg text-sm hover:bg-[rgb(var(--danger))/0.1]"
                     >
-                      Excluir (somente doc)
+                      Excluir
                     </button>
                   </div>
                 </div>

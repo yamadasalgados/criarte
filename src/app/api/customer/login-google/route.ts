@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
-import { getAdminDb } from "@/lib/firebaseAdmin";
-import { signSession } from "@/lib/customerSession";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 
 type Body = { idToken: string };
 
@@ -9,51 +8,47 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as Partial<Body> | null;
     const idToken = String(body?.idToken || "").trim();
-    if (!idToken) return NextResponse.json({ ok: false, error: "Missing idToken" }, { status: 400 });
 
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    const uid = String(decoded?.uid || "").trim();
-    if (!uid) return NextResponse.json({ ok: false, error: "Invalid token" }, { status: 401 });
+    if (!idToken) {
+      return NextResponse.json({ ok: false, error: "Missing idToken" }, { status: 400 });
+    }
+
+    const auth = getAdminAuth();
+
+    // checkRevoked=true é ok, mas se der qualquer instabilidade no Android,
+    // depois podemos mudar pra false. Por enquanto mantém.
+    const decoded = await auth.verifyIdToken(idToken, true);
+
+    const uid = decoded.uid;
+    const email = typeof decoded.email === "string" ? decoded.email : null;
+    const name = typeof decoded.name === "string" ? decoded.name : "";
+    const picture = typeof decoded.picture === "string" ? decoded.picture : null;
 
     const db = getAdminDb();
+    const ref = db.collection("customers").doc(uid);
 
-    // ✅ acha o pedido mais recente desse uid (salvo no checkout)
-    const snap = await db
-      .collection("orders")
-      .where("customer.auth.uid", "==", uid)
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
+    // ✅ não reseta createdAt a cada login
+    const snap = await ref.get();
+    const isNew = !snap.exists;
 
-    if (snap.empty) {
-      return NextResponse.json(
-        { ok: false, error: "Nenhum pedido encontrado para esta conta Google" },
-        { status: 404 }
-      );
+    const payload: any = {
+      uid,
+      email,
+      name,
+      photoURL: picture,
+      provider: "google",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (isNew) {
+      payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
     }
 
-    const doc = snap.docs[0];
-    const order = doc.data() as any;
+    await ref.set(payload, { merge: true });
 
-    const phone = String(order?.customer?.phoneNorm || "").replace(/[^\d]/g, "");
-    if (!phone) {
-      return NextResponse.json({ ok: false, error: "Pedido sem phoneNorm" }, { status: 400 });
-    }
-
-    const token = signSession({ orderId: doc.id, phone });
-
-    const res = NextResponse.json({ ok: true, orderId: doc.id });
-    res.cookies.set("cust_session", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    return res;
+    return NextResponse.json({ ok: true, uid });
   } catch (e: any) {
-    console.error("customer/login-google error:", e);
+    console.error("login-google error:", e);
     return NextResponse.json({ ok: false, error: e?.message || "Erro" }, { status: 500 });
   }
 }

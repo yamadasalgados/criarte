@@ -9,30 +9,32 @@ import { yen } from "@/lib/money";
 import { readCart, addLineItem, type CartItem } from "@/lib/cart";
 import { getLang, onLangChanged, t, type Lang } from "@/lib/i18n";
 
-function isProductActive(p: any) {
-  if (typeof p.active === "boolean") return p.active;
-  if (typeof p.status === "string") {
-    const s = p.status.toLowerCase();
-    return s === "active" || s === "available";
-  }
-  return true;
+/* --- COMPONENTES AUXILIARES --- */
+
+function ProductSkeleton() {
+  return (
+    <div className="rounded-2xl border border-app bg-card p-4 animate-pulse">
+      <div className="aspect-[4/3] w-full rounded-xl bg-card-muted" />
+      <div className="mt-4 h-4 w-3/4 rounded bg-card-muted" />
+      <div className="mt-2 h-3 w-1/4 rounded bg-card-muted" />
+      <div className="mt-6 h-10 w-full rounded-xl bg-card-muted" />
+    </div>
+  );
 }
 
 export default function StoreHome() {
   const [lang, setLang] = useState<Lang>("pt");
-
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-
   const [cartCount, setCartCount] = useState(0);
-
-  // ✅ personalização por produto
   const [customById, setCustomById] = useState<Record<string, string>>({});
+  
+  // Estado para feedback visual no botão
+  const [addingId, setAddingId] = useState<string | null>(null);
 
   const refreshCartCount = () => {
     const items = readCart();
-    const totalQty = items.reduce((s, it) => s + Number(it.qty || 0), 0);
-    setCartCount(totalQty);
+    setCartCount(items.reduce((s, it) => s + (Number(it.qty) || 0), 0));
   };
 
   const load = async () => {
@@ -40,12 +42,10 @@ export default function StoreHome() {
     try {
       const qy = query(collection(db, "products"), orderBy("createdAt", "desc"));
       const snap = await getDocs(qy);
-      const list: Product[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setProducts(list.filter((p: any) => isProductActive(p)));
-    } catch {
-      const snap = await getDocs(collection(db, "products"));
-      const list: Product[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setProducts(list.filter((p: any) => isProductActive(p)));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+      setProducts(list.filter((p: any) => p.active !== false));
+    } catch (err) {
+      console.error("Erro ao carregar produtos", err);
     } finally {
       setLoading(false);
     }
@@ -53,143 +53,153 @@ export default function StoreHome() {
 
   useEffect(() => {
     setLang(getLang());
-    const off = onLangChanged((l) => setLang(l));
-
+    const off = onLangChanged(setLang);
     load();
     refreshCartCount();
 
     const onCart = () => refreshCartCount();
-    window.addEventListener("cart:changed", onCart as any);
-    window.addEventListener("storage", onCart);
-
+    window.addEventListener("cart:changed", onCart);
     return () => {
       off();
-      window.removeEventListener("cart:changed", onCart as any);
-      window.removeEventListener("storage", onCart);
+      window.removeEventListener("cart:changed", onCart);
     };
   }, []);
 
   const addToCart = (p: any) => {
-    const unitPrice = Number(p.salePrice ?? p.price ?? 0);
-    const unitCost = Number(p.unitCost ?? p.cost ?? 0);
-
-    const customText = String(customById[p.id] || "").trim();
-
+    setAddingId(p.id);
+    
     const item: Omit<CartItem, "lineId"> = {
       productId: p.id,
       name: p.name,
       qty: 1,
-      unitPrice,
-      unitCost,
-      photo: p.photos?.[0] || p.photo || p.image,
-      customText: customText || undefined,
+      unitPrice: Number(p.salePrice || 0),
+      unitCost: Number(p.unitCost || 0),
+      photo: p.photos?.[0] || p.photo,
+      customText: customById[p.id]?.trim() || undefined,
     };
 
-    const next = addLineItem(item);
+    addLineItem(item);
+    window.dispatchEvent(new CustomEvent("cart:changed"));
+    setCustomById(prev => ({ ...prev, [p.id]: "" }));
 
-    // ✅ atualiza UI imediatamente
-    setCartCount(next.reduce((s, it) => s + Number(it.qty || 0), 0));
-    try {
-      window.dispatchEvent(new CustomEvent("cart:changed"));
-    } catch {}
-
-    // ✅ limpa campo de personalização desse produto
-    setCustomById((prev) => ({ ...prev, [p.id]: "" }));
-
-    alert(t("shop_added_to_cart", lang));
+    // Remove feedback de "adicionado" após 1.5s
+    setTimeout(() => setAddingId(null), 1500);
   };
 
-  const title = useMemo(() => t("shop_title", lang), [lang]);
-  const subtitle = useMemo(() => t("shop_subtitle", lang), [lang]);
-
   return (
-    <div className="bg-app">
+    <div className="bg-app min-h-screen text-app font-sans">
       <StoreNav />
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold text-app">{title}</h1> 
-
-          {/* ✅ Opcional: botão do carrinho aqui (além do ícone na navbar) */}
-          <a
-            href="/cart"
-            className="btn-ghost rounded-xl px-3 py-2 text-sm"
-            aria-label={`${t("cart", lang)} (${cartCount})`}
-            title={`${t("cart", lang)} (${cartCount})`}
-          >
-            {t("cart", lang)} ({cartCount})
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        {/* HEADER DA LOJA */}
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+          <div>
+            <h1 className="text-4xl font-black tracking-tighter uppercase italic text-app">
+              {t("shop_title", lang)}
+            </h1>
+            <p className="text-muted text-sm mt-1">{t("shop_subtitle", lang)}</p>
+          </div>
+          
+          <a href="/cart" className="flex items-center gap-3 bg-card border border-app px-5 py-2.5 rounded-2xl hover:bg-card-muted transition-all group">
+            <span className="text-xs font-black uppercase tracking-widest text-muted group-hover:text-primary">
+              {t("cart", lang)}
+            </span>
+            <span className="bg-primary text-[rgb(var(--panel2))] text-[10px] font-black px-2 py-0.5 rounded-full">
+              {cartCount}
+            </span>
           </a>
-        </div>
+        </header>
 
-        <p className="mt-1 text-sm text-muted">{subtitle}</p>
-
+        {/* LISTA DE PRODUTOS */}
         {loading ? (
-          <div className="mt-6 text-muted">{t("shop_loading", lang)}</div>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map(i => <ProductSkeleton key={i} />)}
+          </div>
         ) : products.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-app bg-card p-4 text-app">
-            {t("shop_empty", lang)}
+          <div className="text-center py-20 border-2 border-dashed border-app rounded-3xl">
+            <p className="text-muted uppercase font-black tracking-widest">{t("shop_empty", lang)}</p>
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {products.map((p: any) => {
               const imgSrc = p.photos?.[0] || p.photo || p.image;
+              const isAdded = addingId === p.id;
 
               return (
-                <div key={p.id} className="rounded-2xl border border-app bg-card p-4">
-                  <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-card-muted">
+                <div key={p.id} className="group relative flex flex-col rounded-3xl border border-app bg-card overflow-hidden hover:shadow-2xl hover:shadow-primary/5 transition-all duration-300">
+                  
+                  {/* IMAGEM COM HOVER EFFECT */}
+                  <div className="aspect-[4/3] overflow-hidden bg-card-muted">
                     {imgSrc ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={imgSrc} alt={p.name} className="h-full w-full object-cover" />
+                      <img 
+                        src={imgSrc} 
+                        alt={p.name} 
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                      />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-muted">
+                      <div className="flex h-full w-full items-center justify-center text-[10px] font-black uppercase text-muted">
                         {t("shop_no_photo", lang)}
                       </div>
                     )}
                   </div>
 
-                  <div className="mt-3">
-                    <div className="font-semibold text-app">{p.name}</div>
-                    <div className="mt-1 text-sm text-muted">
-                      {yen(Number(p.salePrice ?? p.price ?? 0))}
+                  <div className="p-5 flex flex-col flex-1">
+                    <div className="flex justify-between items-start gap-2 mb-4">
+                      <h3 className="font-bold text-lg text-app leading-tight">{p.name}</h3>
+                      <span className="text-primary font-black tracking-tighter whitespace-nowrap">
+                        {yen(Number(p.salePrice || 0))}
+                      </span>
+                    </div>
+
+                    {/* PERSONALIZAÇÃO - ESTILO BACKSTAGE */}
+                    <div className="mt-auto space-y-4">
+                      <div className="relative">
+                        <label className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-1 block">
+                          {t("shop_customization_label", lang)}
+                        </label>
+                        <input
+                          value={customById[p.id] || ""}
+                          onChange={(e) => setCustomById(prev => ({ ...prev, [p.id]: e.target.value }))}
+                          placeholder={t("shop_customization_placeholder", lang)}
+                          className="w-full bg-app border border-app rounded-xl px-4 py-2.5 text-xs outline-none focus:border-primary/50 transition-all"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => addToCart(p)}
+                        disabled={isAdded}
+                        className={`w-full py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg 
+                          ${isAdded 
+                            ? "bg-emerald-500 text-white shadow-emerald-500/20" 
+                            : "bg-primary text-[rgb(var(--panel2))] hover:brightness-110 shadow-primary/20 active:scale-95"
+                          }`}
+                      >
+                        {isAdded ? "✓ Adicionado" : t("shop_add_to_cart", lang)}
+                      </button>
                     </div>
                   </div>
-
-                  {/* ✅ Personalização (customText) */}
-                  <label className="mt-3 block text-sm text-muted">
-                    {t("shop_customization_label", lang)}
-                    <input
-                      value={customById[p.id] || ""}
-                      onChange={(e) => setCustomById((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                      className="input mt-1 w-full rounded-xl px-3 py-2"
-                      placeholder={t("shop_customization_placeholder", lang)}
-                    />
-                  </label>
-
-                  <button
-                    onClick={() => addToCart(p)}
-                    className="btn-primary mt-4 w-full rounded-xl px-4 py-2 text-sm font-semibold"
-                  >
-                    {t("shop_add_to_cart", lang)}
-                  </button>
-
                 </div>
               );
             })}
           </div>
         )}
 
-        {/* ✅ bloco final (opcional) */}
-        <div className="mt-10 rounded-2xl border border-app bg-card p-4">
-          <div className="font-semibold text-app">{t("shop_has_order_title", lang)}</div>
-          <div className="mt-2 text-sm text-muted">{t("shop_has_order_text", lang)}</div>
-          <a
-            href="/chat"
-            className="btn-ghost mt-3 inline-block rounded-xl px-3 py-2 text-sm"
-          >
+        {/* FOOTER CALL TO ACTION */}
+        <section className="mt-20 p-8 rounded-[2.5rem] border border-app bg-gradient-to-br from-card to-card-muted flex flex-col items-center text-center">
+          <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
+            <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+          </div>
+          <h2 className="text-xl font-black uppercase tracking-tighter text-app italic">{t("shop_has_order_title", lang)}</h2>
+          <p className="mt-2 text-sm text-muted max-w-md leading-relaxed">{t("shop_has_order_text", lang)}</p>
+          <a href="/chat" className="mt-6 px-8 py-3 bg-card border border-app rounded-xl text-xs font-black uppercase tracking-widest hover:bg-app transition-all">
             {t("shop_go_to_chat", lang)}
           </a>
-        </div>
+        </section>
       </main>
+
+      <style jsx>{`
+        .input::placeholder { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.4; }
+      `}</style>
     </div>
   );
 }

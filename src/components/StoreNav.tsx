@@ -4,7 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 import { readCart } from "@/lib/cart";
 import { getLang, onLangChanged, setLang, t, type Lang } from "@/lib/i18n";
 import Link from "next/link";
-import { applyTheme, getTheme, initTheme, onThemeChanged, setTheme, type Theme } from "@/lib/theme";
+import {
+  applyTheme,
+  getTheme,
+  initTheme,
+  onThemeChanged,
+  setTheme,
+  type Theme,
+} from "@/lib/theme";
+import { auth } from "@/lib/firebaseClient";
+import { onAuthStateChanged } from "firebase/auth";
+
+function IconUser(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={props.className} aria-hidden="true">
+      <path
+        d="M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M4 20a8 8 0 0 1 16 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function IconChat(props: { className?: string }) {
   return (
@@ -162,6 +189,9 @@ export default function StoreNav() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>("dark");
 
+  // ✅ login state
+  const [logged, setLogged] = useState(false);
+
   const refreshCartCount = () => {
     const items = readCart();
     const totalQty = items.reduce((s, it) => s + Number(it.qty || 0), 0);
@@ -184,6 +214,9 @@ export default function StoreNav() {
       applyTheme(x);
     });
 
+    // ✅ auth (login)
+    const offAuth = onAuthStateChanged(auth, (u) => setLogged(!!u));
+
     // carrinho
     refreshCartCount();
     const onCart = () => refreshCartCount();
@@ -201,6 +234,7 @@ export default function StoreNav() {
     return () => {
       offLang();
       offTheme();
+      offAuth();
       window.removeEventListener("cart:changed", onCart as any);
       window.removeEventListener("storage", onCart);
       window.removeEventListener("keydown", onEsc);
@@ -213,6 +247,8 @@ export default function StoreNav() {
       cart: t("cart", lang),
       language: t("language", lang),
       theme: t("theme", lang),
+      login: t("login", lang),
+      account: t("account", lang),
     };
   }, [lang]);
 
@@ -235,6 +271,16 @@ export default function StoreNav() {
         </Link>
 
         <div className="flex items-center gap-2">
+          {/* ✅ Login / Conta */}
+          <a
+            href={logged ? "/customer/orders" : "/customer/login"}
+            aria-label={logged ? labels.account : labels.login}
+            title={logged ? labels.account : labels.login}
+            className="h-10 w-10 rounded-2xl border border-app bg-card hover:brightness-[1.03] flex items-center justify-center text-app"
+          >
+            <IconUser className="h-5 w-5" />
+          </a>
+
           <a
             href="/chat"
             aria-label={labels.chat}
@@ -348,8 +394,20 @@ export default function StoreNav() {
               </div>
 
               <div className="mt-3 grid gap-2 overflow-y-auto pr-1 max-h-[60vh]">
-                <ThemeOption theme="light" current={theme} onPick={pickTheme} label={t("theme_light", lang)} lang={lang} />
-                <ThemeOption theme="dark" current={theme} onPick={pickTheme} label={t("theme_dark", lang)} lang={lang} />
+                <ThemeOption
+                  theme="light"
+                  current={theme}
+                  onPick={pickTheme}
+                  label={t("theme_light", lang)}
+                  lang={lang}
+                />
+                <ThemeOption
+                  theme="dark"
+                  current={theme}
+                  onPick={pickTheme}
+                  label={t("theme_dark", lang)}
+                  lang={lang}
+                />
               </div>
             </div>
           </div>

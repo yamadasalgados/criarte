@@ -31,6 +31,7 @@ const dict = {
     cart: "Carrinho",
     language: "Idioma",
     login: "Login",
+    account: "Conta",
 
     // ✅ SHOP
     shop_title: "Catálogo",
@@ -136,6 +137,55 @@ const dict = {
     theme_light: "Claro (oficial)",
     theme_dark: "Escuro (opcional)",
 
+    cust_login_title: "Login do Cliente",
+    cust_login_subtitle:
+      "Entre com Google e complete seus dados para acessar chat e histórico.",
+    cust_login_google: "Entrar com Google",
+    cust_login_mobile_tip: "No celular usamos redirect (mais confiável).",
+    cust_logged_as: "Logado como:",
+    cust_logout_btn: "Sair",
+    cust_profile_name: "Nome",
+    cust_profile_surname: "Sobrenome",
+    cust_profile_phone: "Telefone",
+    cust_profile_address: "Endereço (para entrega)",
+    cust_profile_save_enter: "Salvar e entrar no Chat",
+    cust_profile_history: "Ver histórico",
+    cust_profile_next:
+      "Próximo: histórico de compras + chats por pedido (orders/{id}/messages).",
+    cust_profile_fill_required: "Preencha nome, sobrenome, telefone e endereço.",
+    cust_google_fail: "Falha no login Google",
+    cust_save_fail: "Falha ao salvar perfil",
+    cust_connecting_ellipsis: "Conectando...",
+    cust_saving_ellipsis: "Salvando...",
+
+
+    cust_home_title: "Área do Cliente",
+cust_home_subtitle: "Veja seus dados, pedidos e acesse o chat de cada compra.",
+cust_home_shop: "Loja",
+cust_home_logout: "Sair",
+cust_home_guest: "Cliente",
+cust_home_welcome: "Bem-vindo(a)",
+cust_home_auth_mode: "Modo",
+cust_home_auth_phone: "Telefone + PIN",
+cust_home_view_orders: "Ver pedidos",
+cust_home_open_history: "Abrir histórico",
+cust_home_stat_orders: "Pedidos",
+cust_home_stat_spent: "Total gasto",
+cust_home_stat_last: "Último pedido",
+cust_home_recent_title: "Pedidos recentes",
+cust_home_recent_subtitle: "Clique para abrir o chat do pedido.",
+cust_home_refresh: "Atualizar",
+cust_home_empty_title: "Você ainda não tem pedidos.",
+cust_home_empty_text: "Quando finalizar uma compra, ela vai aparecer aqui com o chat.",
+cust_home_order: "Pedido",
+cust_home_created: "Criado em",
+cust_home_open_chat: "Abrir chat",
+cust_home_view_more: "Ver mais pedidos",
+cust_home_error_title: "Não foi possível carregar seus dados",
+cust_home_retry: "Tentar novamente",
+cust_home_go_login: "Ir para login",
+
+
   },
 
   en: {
@@ -143,6 +193,7 @@ const dict = {
     cart: "Cart",
     language: "Language",
     login: "Login",
+    account: "Account",
 
     // ✅ SHOP
     shop_title: "Catalog",
@@ -248,6 +299,55 @@ const dict = {
     theme_light: "Light (official)",
     theme_dark: "Dark (optional)",
 
+    cust_login_title: "Customer Login",
+    cust_login_subtitle:
+      "Sign in with Google and complete your details to access chat and order history.",
+    cust_login_google: "Sign in with Google",
+    cust_login_mobile_tip: "On mobile we use redirect (more reliable).",
+    cust_logged_as: "Signed in as:",
+    cust_logout_btn: "Logout",
+    cust_profile_name: "First name",
+    cust_profile_surname: "Last name",
+    cust_profile_phone: "Phone",
+    cust_profile_address: "Address (for delivery)",
+    cust_profile_save_enter: "Save and open Chat",
+    cust_profile_history: "View history",
+    cust_profile_next:
+      "Next: order history + per-order chats (orders/{id}/messages).",
+    cust_profile_fill_required: "Please fill name, surname, phone, and address.",
+    cust_google_fail: "Google login failed",
+    cust_save_fail: "Failed to save profile",
+    cust_connecting_ellipsis: "Connecting...",
+    cust_saving_ellipsis: "Saving...",
+
+    cust_home_title: "Customer Area",
+cust_home_subtitle: "See your details, orders, and open the chat for each purchase.",
+cust_home_shop: "Shop",
+cust_home_logout: "Logout",
+cust_home_guest: "Customer",
+cust_home_welcome: "Welcome",
+cust_home_auth_mode: "Mode",
+cust_home_auth_phone: "Phone + PIN",
+cust_home_view_orders: "View orders",
+cust_home_open_history: "Open history",
+cust_home_stat_orders: "Orders",
+cust_home_stat_spent: "Total spent",
+cust_home_stat_last: "Last order",
+cust_home_recent_title: "Recent orders",
+cust_home_recent_subtitle: "Tap to open the order chat.",
+cust_home_refresh: "Refresh",
+cust_home_empty_title: "You don't have any orders yet.",
+cust_home_empty_text: "After checkout, your order will show up here with the chat.",
+cust_home_order: "Order",
+cust_home_created: "Created at",
+cust_home_open_chat: "Open chat",
+cust_home_view_more: "View more orders",
+cust_home_error_title: "We couldn't load your data",
+cust_home_retry: "Try again",
+cust_home_go_login: "Go to login",
+
+
+
   },
 
   ja: {
@@ -255,6 +355,7 @@ const dict = {
     cart: "カート",
     language: "言語",
     login: "ログイン",
+    account: "アカウント",
 
     // ✅ SHOP
     shop_title: "カタログ",
@@ -359,6 +460,55 @@ const dict = {
     choose_theme: "テーマを選択",
     theme_light: "ライト（公式）",
     theme_dark: "ダーク（任意）",
+
+    cust_login_title: "お客様ログイン",
+    cust_login_subtitle:
+      "Googleでログインして、チャットと購入履歴にアクセスするための情報を入力してください。",
+    cust_login_google: "Googleでログイン",
+    cust_login_mobile_tip: "スマホではredirect（より安定）を使います。",
+    cust_logged_as: "ログイン中：",
+    cust_logout_btn: "ログアウト",
+    cust_profile_name: "名前",
+    cust_profile_surname: "姓",
+    cust_profile_phone: "電話番号",
+    cust_profile_address: "住所（配達用）",
+    cust_profile_save_enter: "保存してチャットへ",
+    cust_profile_history: "購入履歴を見る",
+    cust_profile_next:
+      "次：購入履歴 + 注文ごとのチャット（orders/{id}/messages）。",
+    cust_profile_fill_required: "名前・姓・電話番号・住所を入力してください。",
+    cust_google_fail: "Googleログインに失敗しました",
+    cust_save_fail: "プロフィールの保存に失敗しました",
+    cust_connecting_ellipsis: "接続中...",
+    cust_saving_ellipsis: "保存中...",
+
+    cust_home_title: "マイページ",
+cust_home_subtitle: "お客様情報・注文履歴・各注文のチャットにアクセスできます。",
+cust_home_shop: "ショップ",
+cust_home_logout: "ログアウト",
+cust_home_guest: "お客様",
+cust_home_welcome: "ようこそ",
+cust_home_auth_mode: "ログイン方法",
+cust_home_auth_phone: "電話番号 + PIN",
+cust_home_view_orders: "注文履歴を見る",
+cust_home_open_history: "履歴を開く",
+cust_home_stat_orders: "注文数",
+cust_home_stat_spent: "合計金額",
+cust_home_stat_last: "最新注文",
+cust_home_recent_title: "最近の注文",
+cust_home_recent_subtitle: "注文チャットを開けます。",
+cust_home_refresh: "更新",
+cust_home_empty_title: "注文はまだありません。",
+cust_home_empty_text: "注文完了後、ここに表示され、チャットも使えます。",
+cust_home_order: "注文",
+cust_home_created: "作成日時",
+cust_home_open_chat: "チャットを開く",
+cust_home_view_more: "もっと見る",
+cust_home_error_title: "データを読み込めませんでした",
+cust_home_retry: "再試行",
+cust_home_go_login: "ログインへ",
+
+
 
   },
 } satisfies Record<Lang, Record<string, string>>;
